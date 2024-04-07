@@ -20,7 +20,7 @@ This project uses the following dependencies:
 To run the project, simply compile and execute the `main.rs` file:
 
 ```
-cargo run
+cargo run --release
 ```
 
 This will generate the `kde.png` and `histogram.png` files in the project directory.
