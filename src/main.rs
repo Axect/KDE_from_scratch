@@ -2,18 +2,24 @@ use rayon::prelude::*;
 use peroxide::fuga::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let left_peak = 1.0;
+    let right_peak = 3.0;
+    let left_most = 0.0;
+    let right_most = 5.0;
+
     // Data generation - Gaussian mixtures
-    let n_1 = Normal(1.0, 0.2);
-    let n_2 = Normal(3.0, 0.5);
+    let n_1 = Normal(left_peak, 0.2);
+    let n_2 = Normal(right_peak, 0.5);
     let true_pdf = |x: f64| n_1.pdf(x) + n_2.pdf(x);
     let data = concat(&n_1.sample(800), &n_2.sample(700));
 
     // Kernel Density Estimation
-    let x = linspace(0, 5, 1000);
+    let x = linspace(left_most, right_most, 1000);
     let y = x.fmap(true_pdf);
-    let bandwidth = scott_rule(&data);
+    let kernel = Kernel::Epanechnikov;
+    let bandwidth = silverman_bandwidth(&data);
     bandwidth.print();
-    let kde = kernel_density_estimation(&data, bandwidth, Kernel::Epanechnikov, &x);
+    let kde = kernel_density_estimation(&data, bandwidth, kernel, &x);
     let scale_factor = y.max() / kde.max();
     let kde = kde.fmap(|x| x * scale_factor);
 
@@ -29,14 +35,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Piecewise Rejection Sampling
-    let samples = prs(f, 10000, (0.0, 5.0), 100, 1e-6);
+    let samples = prs(f, 10000, (left_most, right_most), 100, 1e-6);
 
     // Histogram from samples
-    let x_bin = linspace(0, 5, 100);
+    let x_bin = linspace(left_most, right_most, 100);
     let mut n_bin = vec![0f64; x_bin.len()];
     samples.iter()
         .for_each(|x| {
-            let bin_idx = (x - 0.0) / (5.0 - 0.0) * (x_bin.len() as f64);
+            let bin_idx = (x - left_most) / (right_most - left_most) * (x_bin.len() as f64);
             n_bin[bin_idx as usize] += 1.0;
         });
     let y_bin = x_bin.fmap(true_pdf);
@@ -143,9 +149,25 @@ fn kernel_density_estimation(data: &[f64], bandwidth: f64, kernel: Kernel, domai
 }
 
 /// Scott's rule for estimating bandwidth
+#[allow(dead_code)]
 fn scott_rule(data: &[f64]) -> f64 {
     let data = data.to_vec();
     let n = data.len() as f64;
     let std = data.sd();
-    std / n.powf(0.2)
+    1.06 * std * n.powf(-0.2)
+}
+
+/// Silverman's rule of thumb for Gaussian kernel
+#[allow(dead_code)]
+fn silverman_bandwidth(data: &[f64]) -> f64 {
+    let data = data.to_vec();
+    let n = data.len() as f64;
+    let sigma = data.sd();
+    (4.0 * sigma.powi(5) / (3.0 * n)).powf(1.0 / 5.0)
+}
+
+/// Optuna's bandwidth
+#[allow(dead_code)]
+fn optuna_bandwidth(data: &[f64], left: f64, right: f64) -> f64 {
+    (right - left) / 5f64 * (data.len() as f64).powf(-0.2)
 }
