@@ -11,8 +11,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Kernel Density Estimation
     let x = linspace(0, 5, 1000);
     let y = x.fmap(true_pdf);
-    let bandwidth = 0.35;
-    let kde = kernel_density_estimation(&data, bandwidth, Kernel::Quartic, &x);
+    let bandwidth = scott_rule(&data);
+    bandwidth.print();
+    let kde = kernel_density_estimation(&data, bandwidth, Kernel::Epanechnikov, &x);
     let scale_factor = y.max() / kde.max();
     let kde = kde.fmap(|x| x * scale_factor);
 
@@ -141,3 +142,10 @@ fn kernel_density_estimation(data: &[f64], bandwidth: f64, kernel: Kernel, domai
         })
 }
 
+/// Scott's rule for estimating bandwidth
+fn scott_rule(data: &[f64]) -> f64 {
+    let data = data.to_vec();
+    let n = data.len() as f64;
+    let std = data.sd();
+    std / n.powf(0.2)
+}
