@@ -79,7 +79,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_path("histogram.png")
         .savefig()?;
 
+    //// TPE
+    //let mut tpe = TPEFloat::new((0f64, 6f64), 0.2, 100, 10, Kernel::Epanechnikov);
+    //for _ in 0 .. 100 {
+    //    let param_candidates = tpe.ask();
+    //    param_candidates.print();
+    //    let param_max = param_candidates.max();
+    //    let param_min = param_candidates.min();
+    //    if param_max - param_min < 1e-3 * 10f64 {
+    //        break;
+    //    }
+    //    param_candidates.into_iter()
+    //        .for_each(
+    //            |param| {
+    //                let object = objective(param);
+    //                tpe.report(param, object);
+    //            }
+    //        );
+    //}
+    //let best_params = tpe.ask();
+    //best_params.print();
+
     Ok(())
+}
+
+fn objective(x: f64) -> f64 {
+    x.sin().abs()
 }
 
 /// Gaussian kernel function
@@ -170,4 +195,87 @@ fn silverman_bandwidth(data: &[f64]) -> f64 {
 #[allow(dead_code)]
 fn optuna_bandwidth(data: &[f64], left: f64, right: f64) -> f64 {
     (right - left) / 5f64 * (data.len() as f64).powf(-0.2)
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+struct TPEFloat {
+    hyperparameter_range: (f64, f64),
+    alpha: f64,
+    n_init_samples: usize,
+    n_out_samples: usize,
+    kernel: Kernel,
+    evaluations: Vec<(f64, f64)>,
+}
+
+impl TPEFloat {
+    fn new(hyperparameter_range: (f64, f64), alpha: f64, n_init_samples: usize, n_out_samples: usize, kernel: Kernel) -> Self {
+        TPEFloat {
+            hyperparameter_range,
+            alpha,
+            n_init_samples,
+            n_out_samples,
+            kernel,
+            evaluations: Vec::new(),
+        }
+    }
+
+    fn get_range(&self) -> (f64, f64) {
+        self.hyperparameter_range
+    }
+
+    fn report(&mut self, hyperparameter: f64, score: f64) {
+        self.evaluations.push((hyperparameter, score));
+    }
+
+    fn ask(&mut self) -> Vec<f64> {
+        // TPE 최적화 로직 구현
+        // 1. 초기 하이퍼파라미터 값 랜덤 샘플링
+        // 2. 반복:
+        //    - self.evaluations를 성능에 따라 good, bad 그룹으로 분할
+        //    - good, bad 각각에 대해 KDE로 분포 추정
+        //    - l(x) / g(x)를 최대화하는 하이퍼파라미터 값 선택
+        //    - 선택된 값을 반환하여 사용자가 평가 후 report로 결과 전달
+        // 3. 최적 하이퍼파라미터 값 반환
+        if self.evaluations.len() < self.n_init_samples {
+            let u = Uniform(self.hyperparameter_range.0, self.hyperparameter_range.1);
+            u.sample(self.n_out_samples)
+        } else {
+            let (left, right) = self.get_range();
+            let mut eval = self.evaluations.clone();
+            eval.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+            let good_len = (eval.len() as f64 * self.alpha) as usize;
+
+            let (good, _): (Vec<f64>, Vec<f64>) = eval[..good_len].iter().cloned().unzip();
+            let (bad, _): (Vec<f64>, Vec<f64>) = eval[good_len..].iter().cloned().unzip();
+
+            let bandwidth_good = silverman_bandwidth(&good);
+            let bandwidth_bad = silverman_bandwidth(&bad);
+
+            let domain = linspace(left, right, 100);
+
+            let kde_good = kernel_density_estimation(&good, bandwidth_good, self.kernel, &domain);
+            let kde_bad = kernel_density_estimation(&bad, bandwidth_bad, self.kernel, &domain);
+
+            let ei = zip_with(|l, g| {
+                let g = if g <= 1e-6 { 1e-6 } else { g };
+                let l = if l <= 0f64 { 0f64 } else { l };
+                l / g
+            }, &kde_good, &kde_bad);
+
+            let cs_ei = cubic_hermite_spline(&domain, &ei, Quadratic);
+
+            let f = |x: f64| { 
+                let y = cs_ei.eval(x);
+                if y < 0.0 {
+                    0.0
+                } else {
+                    y
+                }
+            };
+
+            prs(f, self.n_out_samples, (left, right), 10, 1e-6)
+        }
+    }
 }
